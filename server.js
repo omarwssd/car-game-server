@@ -1,64 +1,69 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
+const WebSocket = require("ws");
 
 const app = express();
 const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-const io = new Server(server, {
-  cors: {
-    origin: "*"
-  }
-});
-
-// Store players
 const players = {};
 
-// When player connects
-io.on("connection", (socket) => {
-  console.log("Player connected:", socket.id);
+function broadcast(data) {
+  const msg = JSON.stringify(data);
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+}
 
-  // Add player
-  players[socket.id] = {
-    x: 0,
-    y: 0,
-    z: 0,
-    rot: 0
-  };
+wss.on("connection", (ws) => {
+  const id = Math.random().toString(36).substr(2, 9);
 
-  // Send current players to new player
-  socket.emit("current_players", players);
+  players[id] = { x: 0, y: 0, z: 0, rot: 0 };
+
+  console.log("Player connected:", id);
+
+  // Send player their ID
+  ws.send(JSON.stringify({
+    type: "init",
+    id: id,
+    players: players
+  }));
 
   // Notify others
-  socket.broadcast.emit("player_joined", {
-    id: socket.id,
-    data: players[socket.id]
+  broadcast({
+    type: "join",
+    id: id,
+    data: players[id]
   });
 
-  // Receive movement updates
-  socket.on("update", (data) => {
-    if (players[socket.id]) {
-      players[socket.id] = data;
+  ws.on("message", (msg) => {
+    const data = JSON.parse(msg);
 
-      // Broadcast to others
-      socket.broadcast.emit("player_moved", {
-        id: socket.id,
-        data
+    if (data.type === "update") {
+      players[id] = data.data;
+
+      broadcast({
+        type: "update",
+        id: id,
+        data: data.data
       });
     }
   });
 
-  // On disconnect
-  socket.on("disconnect", () => {
-    console.log("Player disconnected:", socket.id);
+  ws.on("close", () => {
+    delete players[id];
 
-    delete players[socket.id];
+    broadcast({
+      type: "leave",
+      id: id
+    });
 
-    io.emit("player_left", socket.id);
+    console.log("Player disconnected:", id);
   });
 });
 
-// Start server
 server.listen(3000, () => {
   console.log("Server running on port 3000");
 });
