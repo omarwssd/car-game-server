@@ -8,7 +8,9 @@ const wss = new WebSocket.Server({ server });
 
 const MAX_PLAYERS = 10;
 
-// rooms structure
+// =========================
+// ROOMS
+// =========================
 const rooms = {};
 
 function createRoom() {
@@ -41,29 +43,34 @@ function broadcast(roomId, data) {
   }
 }
 
+// =========================
+// CONNECTION
+// =========================
 wss.on("connection", (ws) => {
   const playerId = Math.random().toString(36).substr(2, 9);
   const roomId = findRoom();
 
-  ws.roomId = roomId;
   ws.id = playerId;
+  ws.roomId = roomId;
 
   if (!rooms[roomId]) createRoom();
 
-  // default player data
+  // 🔥 IMPORTANT: player now includes NAME
   rooms[roomId].players[playerId] = {
     x: 0,
     y: 0,
     z: 0,
     rot: 0,
-    name: "Unknown" // IMPORTANT FIX
+    name: "Unknown" // default until join packet
   };
 
   rooms[roomId].sockets[playerId] = ws;
 
   console.log(`Player ${playerId} joined ${roomId}`);
 
-  // send init (ALL players)
+  // =========================
+  // INIT (SEND FULL ROOM STATE)
+  // =========================
   send(ws, {
     type: "init",
     id: playerId,
@@ -71,16 +78,20 @@ wss.on("connection", (ws) => {
     players: rooms[roomId].players
   });
 
+  // =========================
+  // MESSAGES
+  // =========================
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
 
     // =========================
-    // JOIN (FIXED WITH NAME)
+    // JOIN (FIXED NAME HANDLING)
     // =========================
     if (data.type === "join") {
 
       const name = data.name || "Unknown";
 
+      // 🔥 store name properly in server state
       rooms[roomId].players[playerId].name = name;
 
       console.log(`Player joined: ${name} (${playerId})`);
@@ -93,23 +104,30 @@ wss.on("connection", (ws) => {
     }
 
     // =========================
-    // UPDATE POSITION
+    // POSITION UPDATE
     // =========================
     if (data.type === "update") {
-      rooms[roomId].players[playerId] = {
-        ...rooms[roomId].players[playerId],
-        ...data.data
-      };
+      if (rooms[roomId].players[playerId]) {
+        rooms[roomId].players[playerId] = {
+          ...rooms[roomId].players[playerId],
+          ...data.data
+        };
 
-      broadcast(roomId, {
-        type: "update",
-        id: playerId,
-        data: rooms[roomId].players[playerId]
-      });
+        broadcast(roomId, {
+          type: "update",
+          id: playerId,
+          data: rooms[roomId].players[playerId]
+        });
+      }
     }
   });
 
+  // =========================
+  // DISCONNECT
+  // =========================
   ws.on("close", () => {
+    if (!rooms[roomId]) return;
+
     delete rooms[roomId].players[playerId];
     delete rooms[roomId].sockets[playerId];
 
@@ -122,6 +140,9 @@ wss.on("connection", (ws) => {
   });
 });
 
+// =========================
+// START SERVER
+// =========================
 server.listen(3000, () => {
-  console.log("Server running with rooms");
+  console.log("Server running with rooms + names fixed");
 });
