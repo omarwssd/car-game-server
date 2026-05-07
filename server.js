@@ -8,9 +8,6 @@ const wss = new WebSocket.Server({ server });
 
 const MAX_PLAYERS = 10;
 
-// =========================
-// ROOMS
-// =========================
 const rooms = {};
 
 function createRoom() {
@@ -37,15 +34,12 @@ function broadcast(roomId, data) {
 
   for (const id in rooms[roomId].sockets) {
     const client = rooms[roomId].sockets[id];
-    if (client.readyState === WebSocket.OPEN) {
+    if (client && client.readyState === WebSocket.OPEN) {
       client.send(msg);
     }
   }
 }
 
-// =========================
-// CONNECTION
-// =========================
 wss.on("connection", (ws) => {
   const playerId = Math.random().toString(36).substr(2, 9);
   const roomId = findRoom();
@@ -55,63 +49,59 @@ wss.on("connection", (ws) => {
 
   if (!rooms[roomId]) createRoom();
 
-  // 🔥 IMPORTANT: player now includes NAME
-  rooms[roomId].players[playerId] = {
-    x: 0,
-    y: 0,
-    z: 0,
-    rot: 0,
-    name: "Unknown" // default until join packet
-  };
-
-  rooms[roomId].sockets[playerId] = ws;
-
-  console.log(`Player ${playerId} joined ${roomId}`);
+  console.log(`Player ${playerId} connected to ${roomId}`);
 
   // =========================
-  // INIT (SEND FULL ROOM STATE)
-  // =========================
-  send(ws, {
-    type: "init",
-    id: playerId,
-    room: roomId,
-    players: rooms[roomId].players
-  });
-
-  // =========================
-  // MESSAGES
+  // MESSAGE HANDLER
   // =========================
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
 
     // =========================
-    // JOIN (FIXED NAME HANDLING)
+    // JOIN
     // =========================
     if (data.type === "join") {
+      const playerName = data.name || "Unknown";
 
-      const name = data.name || "Unknown";
+      console.log("JOIN RECEIVED:");
+      console.log("ID:", playerId);
+      console.log("NAME:", playerName);
 
-      // 🔥 store name properly in server state
-      rooms[roomId].players[playerId].name = name;
+      rooms[roomId].players[playerId] = {
+        x: 0,
+        y: 0,
+        z: 0,
+        rot: 0,
+        name: playerName
+      };
 
-      console.log(`Player joined: ${name} (${playerId})`);
+      rooms[roomId].sockets[playerId] = ws;
 
+      // send full state to joining player
+      send(ws, {
+        type: "init",
+        id: playerId,
+        room: roomId,
+        players: rooms[roomId].players
+      });
+
+      // notify others
       broadcast(roomId, {
         type: "join",
         id: playerId,
-        name: name
+        data: rooms[roomId].players[playerId]
       });
     }
 
     // =========================
-    // POSITION UPDATE
+    // UPDATE
     // =========================
     if (data.type === "update") {
       if (rooms[roomId].players[playerId]) {
-        rooms[roomId].players[playerId] = {
-          ...rooms[roomId].players[playerId],
-          ...data.data
-        };
+        rooms[roomId].players[playerId].x = data.data.x;
+        rooms[roomId].players[playerId].y = data.data.y;
+        rooms[roomId].players[playerId].z = data.data.z;
+        rooms[roomId].players[playerId].rot = data.data.rot;
 
         broadcast(roomId, {
           type: "update",
@@ -126,23 +116,20 @@ wss.on("connection", (ws) => {
   // DISCONNECT
   // =========================
   ws.on("close", () => {
-    if (!rooms[roomId]) return;
-
-    delete rooms[roomId].players[playerId];
-    delete rooms[roomId].sockets[playerId];
-
-    broadcast(roomId, {
-      type: "leave",
-      id: playerId
-    });
-
     console.log(`Player ${playerId} left ${roomId}`);
+
+    if (rooms[roomId]) {
+      delete rooms[roomId].players[playerId];
+      delete rooms[roomId].sockets[playerId];
+
+      broadcast(roomId, {
+        type: "leave",
+        id: playerId
+      });
+    }
   });
 });
 
-// =========================
-// START SERVER
-// =========================
 server.listen(3000, () => {
-  console.log("Server running with rooms + names fixed");
+  console.log("Server running with rooms");
 });
