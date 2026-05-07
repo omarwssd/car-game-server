@@ -49,35 +49,54 @@ wss.on("connection", (ws) => {
 
   if (!rooms[roomId]) createRoom();
 
-  console.log(`Player ${playerId} connected to ${roomId}`);
+  console.log(`\n[CONNECT] Player ${playerId} → ${roomId}`);
 
-  // =========================
-  // MESSAGE HANDLER
-  // =========================
   ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
+    let data;
 
     // =========================
-    // JOIN
+    // SAFE PARSE DEBUG
+    // =========================
+    try {
+      data = JSON.parse(msg);
+    } catch (e) {
+      console.log("[ERROR] Invalid JSON:", msg.toString());
+      return;
+    }
+
+    console.log("\n[RECEIVED MESSAGE]");
+    console.log("FROM:", playerId);
+    console.log("RAW:", data);
+
+    // =========================
+    // JOIN DEBUG
     // =========================
     if (data.type === "join") {
-      const playerName = data.name || "Unknown";
+      const playerName = data.name;
 
-      console.log("JOIN RECEIVED:");
+      console.log("\n[JOIN DEBUG]");
       console.log("ID:", playerId);
-      console.log("NAME:", playerName);
 
+      if (playerName && playerName !== "") {
+        console.log("NAME RECEIVED:", playerName);
+      } else {
+        console.log("⚠️ NAME MISSING OR EMPTY!");
+      }
+
+      // store player
       rooms[roomId].players[playerId] = {
         x: 0,
         y: 0,
         z: 0,
         rot: 0,
-        name: playerName
+        name: playerName || "Unknown"
       };
 
       rooms[roomId].sockets[playerId] = ws;
 
-      // send full state to joining player
+      console.log("[STORED PLAYER]:", rooms[roomId].players[playerId]);
+
+      // send init
       send(ws, {
         type: "init",
         id: playerId,
@@ -94,7 +113,7 @@ wss.on("connection", (ws) => {
     }
 
     // =========================
-    // UPDATE
+    // UPDATE DEBUG
     // =========================
     if (data.type === "update") {
       if (rooms[roomId].players[playerId]) {
@@ -112,11 +131,8 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // =========================
-  // DISCONNECT
-  // =========================
   ws.on("close", () => {
-    console.log(`Player ${playerId} left ${roomId}`);
+    console.log(`\n[DISCONNECT] Player ${playerId} left ${roomId}`);
 
     if (rooms[roomId]) {
       delete rooms[roomId].players[playerId];
@@ -131,5 +147,5 @@ wss.on("connection", (ws) => {
 });
 
 server.listen(3000, () => {
-  console.log("Server running with rooms");
+  console.log("Server running with FULL debug enabled");
 });
