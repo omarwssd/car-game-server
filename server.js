@@ -8,6 +8,7 @@ const wss = new WebSocket.Server({ server });
 
 const MAX_PLAYERS = 10;
 
+// rooms structure
 const rooms = {};
 
 function createRoom() {
@@ -34,7 +35,7 @@ function broadcast(roomId, data) {
 
   for (const id in rooms[roomId].sockets) {
     const client = rooms[roomId].sockets[id];
-    if (client && client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN) {
       client.send(msg);
     }
   }
@@ -44,108 +45,83 @@ wss.on("connection", (ws) => {
   const playerId = Math.random().toString(36).substr(2, 9);
   const roomId = findRoom();
 
-  ws.id = playerId;
   ws.roomId = roomId;
+  ws.id = playerId;
 
   if (!rooms[roomId]) createRoom();
 
-  console.log(`\n[CONNECT] Player ${playerId} → ${roomId}`);
+  // default player data
+  rooms[roomId].players[playerId] = {
+    x: 0,
+    y: 0,
+    z: 0,
+    rot: 0,
+    name: "Unknown" // IMPORTANT FIX
+  };
+
+  rooms[roomId].sockets[playerId] = ws;
+
+  console.log(`Player ${playerId} joined ${roomId}`);
+
+  // send init (ALL players)
+  send(ws, {
+    type: "init",
+    id: playerId,
+    room: roomId,
+    players: rooms[roomId].players
+  });
 
   ws.on("message", (msg) => {
-    let data;
+    const data = JSON.parse(msg);
 
     // =========================
-    // SAFE PARSE DEBUG
-    // =========================
-    try {
-      data = JSON.parse(msg);
-    } catch (e) {
-      console.log("[ERROR] Invalid JSON:", msg.toString());
-      return;
-    }
-
-    console.log("\n[RECEIVED MESSAGE]");
-    console.log("FROM:", playerId);
-    console.log("RAW:", data);
-
-    // =========================
-    // JOIN DEBUG
+    // JOIN (FIXED WITH NAME)
     // =========================
     if (data.type === "join") {
-      const playerName = data.name;
 
-      console.log("\n[JOIN DEBUG]");
-      console.log("ID:", playerId);
+      const name = data.name || "Unknown";
 
-      if (playerName && playerName !== "") {
-        console.log("NAME RECEIVED:", playerName);
-      } else {
-        console.log("⚠️ NAME MISSING OR EMPTY!");
-      }
+      rooms[roomId].players[playerId].name = name;
 
-      // store player
-      rooms[roomId].players[playerId] = {
-        x: 0,
-        y: 0,
-        z: 0,
-        rot: 0,
-        name: playerName || "Unknown"
-      };
+      console.log(`Player joined: ${name} (${playerId})`);
 
-      rooms[roomId].sockets[playerId] = ws;
-
-      console.log("[STORED PLAYER]:", rooms[roomId].players[playerId]);
-
-      // send init
-      send(ws, {
-        type: "init",
-        id: playerId,
-        room: roomId,
-        players: rooms[roomId].players
-      });
-
-      // notify others
       broadcast(roomId, {
         type: "join",
+        id: playerId,
+        name: name
+      });
+    }
+
+    // =========================
+    // UPDATE POSITION
+    // =========================
+    if (data.type === "update") {
+      rooms[roomId].players[playerId] = {
+        ...rooms[roomId].players[playerId],
+        ...data.data
+      };
+
+      broadcast(roomId, {
+        type: "update",
         id: playerId,
         data: rooms[roomId].players[playerId]
       });
     }
-
-    // =========================
-    // UPDATE DEBUG
-    // =========================
-    if (data.type === "update") {
-      if (rooms[roomId].players[playerId]) {
-        rooms[roomId].players[playerId].x = data.data.x;
-        rooms[roomId].players[playerId].y = data.data.y;
-        rooms[roomId].players[playerId].z = data.data.z;
-        rooms[roomId].players[playerId].rot = data.data.rot;
-
-        broadcast(roomId, {
-          type: "update",
-          id: playerId,
-          data: rooms[roomId].players[playerId]
-        });
-      }
-    }
   });
 
   ws.on("close", () => {
-    console.log(`\n[DISCONNECT] Player ${playerId} left ${roomId}`);
+    delete rooms[roomId].players[playerId];
+    delete rooms[roomId].sockets[playerId];
 
-    if (rooms[roomId]) {
-      delete rooms[roomId].players[playerId];
-      delete rooms[roomId].sockets[playerId];
+    broadcast(roomId, {
+      type: "leave",
+      id: playerId
+    });
 
-      broadcast(roomId, {
-        type: "leave",
-        id: playerId
-      });
-    }
+    console.log(`Player ${playerId} left ${roomId}`);
   });
 });
 
 server.listen(3000, () => {
-  console.log("Server running with FULL debug enabled");
+  console.log("Server running with rooms");
 });
